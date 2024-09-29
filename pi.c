@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <fenv.h>
 
 #define FLOOR 0
 #define CEIL 1
@@ -12,89 +13,105 @@ union doubleHex{
     double valor;
 };
 
-int num(int k){
-    int potencia2 = 1;
-    //calculando 2^k no numerador
+struct retorno {
+    int n;
+    double somaAnterior;
+    double somaAtual;
+    int flops;
+};
+
+double num(int k, struct retorno *retorno){
+    unsigned long long potencia2 = 1;
     for (int i = 1; i <= k; i++){
         potencia2 *= 2;
-        //printf ("potencia2: %d\n",potencia2);
     }
-    int potenciaK = 1;
+    double potenciaK = 1;
     if (k > 1){
-    //calculando k
-        printf ("k é maior que 1\n");
-        int result = 1;
+        double result = 1;
         for(int i=1; i<=k; ++i){
             result *= i;   
+            retorno->flops++;
         }
-        //calculando o resultado de k! ao quadrado
         potenciaK = result * result;
-        printf ("\tpotenciaK: %d\n",potenciaK);
+        retorno->flops++;
     }
-    int numerador = potencia2 * potenciaK;
-    printf ("\tNumerador: %d\n",numerador);
+    double numerador = potencia2 * potenciaK;
     return numerador;
 }
 
-int den (int k){
+double den (int k, struct retorno *retorno){
     int dentro = 2 * k +1;
-    int denominador = 1;
+    double denominador = 1;
     if (dentro > 1){
         for(int i=1; i<=dentro; ++i){
-            denominador *= i;              
+            denominador *= i;       
+            retorno->flops++;       
         }
-    }
-    printf ("\tDenominador: %d\n",denominador);
+    } 
     return denominador;
 }
 
-double somatorio (int k, int arredondar){
-    double soma = 0.0;
-    int count = 0;
-    printf ("Iteração de um somatorio até k=%d\n",k);
-    for (int i =0; i<=k;i++){
-        printf ("\tcount :%d",count);
-        int numerador = num(k);
-        int denominador = den(k);
-        double valor = 0.0;
-        valor = (double) numerador / denominador;
-        if (arredondar == FLOOR){
-            valor = floor(valor * 1e15); //arredondar para baixo em relação às casas decimais
-            valor= valor / 1e15;
-        }
-        else{
-            valor = ceil(valor * 1e15) / 1e15; //arredondar para cima em relação às casas decimais
-        }
-        printf ("\tValor (k eh %d): %1.15f \n",k,valor);
+double somatorio (int k, struct retorno *retorno){
+    double soma = 1.0;
+    retorno->n = 0;
+    for (int i =1; i<=k;i++){
+        double numerador = num(i, retorno);
+        double denominador = den(i, retorno);
+        double valor = numerador / denominador;
         soma = soma + valor;
-        printf ("\tNova Soma: %1.15f e %.15e\n",soma,soma);
-        count ++;
+        retorno->flops++;
+        retorno->n++;
     }
     return soma;
 }
 
-double calculoPi (double tolerancia, int arredondar){
-    double it1 = 0.0; //guardar valor da iteração atual
-    double it2; //guardar valor da iteração anterior
-    int k = 0; //valor pelo qual vou ficar iterando
-    //para k = 0
-    it2 = somatorio (k,arredondar);
-    printf ("fiz a primeira iteração\n");
-    while (it2 - it1 > tolerancia){
-        printf ("ainda é menor: %1.15f\n\n",it2-it1);
+double calculoPi (double tolerancia, struct retorno *retorno){
+    double it1;
+    it1= 1.0;
+    double it2;
+    int k = 1;
+    it2 = somatorio (k,retorno);
+    while (fabs(it2 - it1) > tolerancia){
+        retorno->flops++;
         k = k + 1;
         it1 = it2;
-        it2 = somatorio (k,arredondar);
+        it2 = somatorio (k,retorno);
     }
+    retorno->somaAnterior = it1;
+    retorno->somaAtual = it2;
     return it2;
-
 }
 
 int main(){
+    struct retorno retorno;
+    retorno.n = 0;
     double tolerancia;
     printf ("Digite a tolerância: \t");
     scanf("%lf",&tolerancia);
-    int arredondar = FLOOR;
-    double pi = calculoPi(tolerancia,arredondar);
-    printf ("pi: %1.15f e %.15e",pi,pi);
+
+    //arredondar para baixo
+    fesetround(FE_DOWNWARD);
+    union doubleHex piBaixo;
+    piBaixo.valor = calculoPi(tolerancia,&retorno) * 2;
+
+    //arredondar para cima
+    retorno = (struct retorno){0, 0, 0.0, 0.0};
+    fesetround(FE_UPWARD);
+    union doubleHex piCima;
+    piCima.valor = calculoPi(tolerancia,&retorno) * 2;
+    retorno.flops++;
+
+    //calculos dos resultados
+    double erro_aproximado = fabs((retorno.somaAtual - retorno.somaAnterior)/retorno.somaAtual);
+    double erro_exato = fabs (piCima.valor - M_PI);
+    int ulpsDiff = abs(piBaixo.binario - piCima.binario); //subtraio a representação de bits dos dois números
+
+    //impressões
+    printf ("n: %d\n",retorno.n);
+    printf ("erro aproximado: %.15e\n",erro_aproximado);
+    printf ("erro exato: %.15e\n",erro_exato);
+    printf ("piBaixo: %.15e\n",piBaixo.valor);
+    printf ("piCima: %1.15e\n",piCima.valor);
+    printf ("ULPs diff: %d\n", ulpsDiff);
+    printf ("Flops: %d\n",retorno.flops);
 }
